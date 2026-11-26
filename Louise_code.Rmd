@@ -208,3 +208,84 @@ dim(counts_filtered)
 nrow(counts_AnCg) - nrow(counts_filtered)
 ```
 
+normalization:
+```{r}
+library(DESeq2)
+
+# Zorg dat metadata overeenkomt met de count-data
+rownames(metadata_AnCg) <- metadata_AnCg$description
+metadata_AnCg <- metadata_AnCg[colnames(counts_filtered), ]
+
+# Stel de diagnosegroepen correct in
+metadata_AnCg$diagnosis <- factor(
+  metadata_AnCg$diagnosis,
+  levels = c("Control", "Major Depression")
+)
+
+# Maak het DESeq2-object
+dds <- DESeqDataSetFromMatrix(
+  countData = round(counts_filtered),
+  colData = metadata_AnCg,
+  design = ~ age + diagnosis
+)
+
+# Normalisatie en differentiële expressieanalyse
+dds <- DESeq(dds)
+
+# Genormaliseerde counts ophalen
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# VST-transformatie voor visualisatie
+vsd <- vst(dds, blind = TRUE)
+vst_counts <- assay(vsd)
+```
+
+visualisation with box-plot:
+-> before normalization:
+```{r}
+boxplot(
+  log2(counts_filtered + 1),
+  las = 2,
+  outline = FALSE,
+  main = "Raw counts per sample",
+  ylab = "log2(counts + 1)",
+  xlab = "Samples"
+)
+```
+--> after normalisation
+```{r}
+boxplot(
+  log2(normalized_counts + 1),
+  las = 2,
+  outline = FALSE,
+  main = "Normalized counts per sample",
+  ylab = "log2(normalized counts + 1)",
+  xlab = "Samples"
+)
+```
+log-transformation:
+--> new dataset
+```{r}
+# Variance Stabilizing Transformation 
+vsd <- vst(dds, blind = TRUE)
+
+# Transformed values to matrix
+log_counts <- assay(vsd)
+```
+--> are there missing values in this dataset?
+```{r}
+sum(is.na(log_counts))
+```
+--> no
+--> boxplot with log-transformed dataset
+```{r}
+boxplot(
+  log_counts,
+  las = 2,
+  outline = FALSE,
+  main = "VST-transformed gene expression",
+  ylab = "VST expression values",
+  xlab = "Samples"
+)
+```
+
