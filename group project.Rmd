@@ -1,0 +1,285 @@
+---
+title: "Group project"
+output: html_document
+date: "2026-11-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+eerst inlezen 2 datasets:
+```{r}
+library(tidyverse)
+count_data <- read_csv("C:/Users/louis/Downloads/GSE80655_counts.csv")
+metadata <- read_csv("C:/Users/louis/Downloads/GSE80655_metadata.csv")
+```
+om data te verkennen:
+```{r}
+head(count_data)
+head(metadata)
+```
+
+```{r}
+summary(count_data)
+summary(metadata)
+```
+zijn er missing values?
+```{r}
+is.na(count_data)
+is.na(metadata)
+```
+
+```{r}
+summarise(count_data,na.rm = TRUE)
+```
+
+laden andere packages:
+```{r}
+install.packages(c(
+  "tidyverse",
+  "ggplot2",
+  "pheatmap",
+  "caret",
+  "pROC",
+  "glmnet",
+  "randomForest"
+))
+
+# Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install(c("DESeq2", "limma"))
+
+```
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(pheatmap)
+library(glmnet)
+library(randomForest)
+```
+structuur datasets:
+```{r}
+# Kolomnamen
+colnames(metadata)
+colnames(count_data)
+
+# Duplicaten
+sum(duplicated(metadata$description))
+sum(duplicated(count_data$gene_id))
+
+# Missing values
+colSums(is.na(metadata))
+colSums(is.na(count_data))
+```
+verdeling van de diagnoses:
+```{r}
+table(metadata$diagnosis)
+
+ggplot(metadata, aes(x = diagnosis, fill = diagnosis)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(
+    title = "Distribution of psychiatric diagnoses",
+    x = "Diagnosis",
+    y = "Number of samples"
+  ) +
+  theme(legend.position = "none")
+```
+
+diagnoses per brain region:
+```{r}
+table(metadata$brain_region, metadata$diagnosis)
+
+ggplot(metadata, aes(x = brain_region, fill = diagnosis)) +
+  geom_bar(position = "dodge") +
+  theme_minimal() +
+  labs(
+    title = "Diagnosis distribution across brain regions",
+    x = "Brain region",
+    y = "Number of samples",
+    fill = "Diagnosis"
+  )
+```
+
+distribution of age and other metadata
+```{r}
+ggplot(metadata, aes(x = diagnosis, y = age, fill = diagnosis)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Age distribution by diagnosis",
+    x = "Diagnosis",
+    y = "Age"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r}
+ggplot(metadata, aes(x = diagnosis, y = PMI, fill = diagnosis)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "PMI distribution by diagnosis",
+    x = "Diagnosis",
+    y = "PMI"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r}
+ggplot(metadata, aes(x = diagnosis, y = brain_pH, fill = diagnosis)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Brain pH distribution by diagnosis",
+    x = "Diagnosis",
+    y = "Brain pH"
+  ) +
+  theme(legend.position = "none")
+```
+kan ook voor sex?
+
+
+sample_ids matchen:
+```{r}
+sample_ids <- colnames(count_data)[-1]
+
+all(sample_ids %in% metadata$description)
+all(metadata$description %in% sample_ids)
+```
+omzetten count matrix (5.4.)
+```{r}
+gene_counts <- count_data %>%
+  column_to_rownames("gene_id") %>%
+  as.matrix()
+
+storage.mode(gene_counts) <- "numeric"
+
+# Metadata in dezelfde volgorde zetten als counts
+metadata <- metadata[
+  match(colnames(gene_counts), metadata$description),
+]
+
+rownames(metadata) <- metadata$description
+
+stopifnot(
+  identical(colnames(gene_counts), rownames(metadata))
+)
+```
+
+
+
+genen met heel lage sequentie uitfilteren:
+```{r}
+keep_genes <- rowSums(gene_counts > 0) > 0
+
+filtered_counts <- gene_counts[keep_genes, ]
+
+dim(filtered_counts)
+```
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+BiocManager::install("DESeq2")
+```
+```{r}
+library(DESeq2)
+```
+
+normalisation for differential expression
+```{r}
+dds <- DESeqDataSetFromMatrix(
+  countData = filtered_counts,
+  colData = metadata,
+  design = ~ diagnosis
+)
+
+dds <- estimateSizeFactors(dds)
+
+normalized_counts <- counts(
+  dds,
+  normalized = TRUE
+)
+```
+```{r}
+vsd <- vst(dds, blind = TRUE)
+
+expression_matrix <- assay(vsd)
+
+dim(expression_matrix)
+```
+
+
+
+exploration of gene expression (PCA (Principal Component Analysis))
+```{r}
+pca_data <- plotPCA(
+  vsd,
+  intgroup = c("diagnosis", "brain_region"),
+  returnData = TRUE
+)
+
+percentVar <- round(
+  100 * attr(pca_data, "percentVar")
+)
+
+ggplot(pca_data, aes(
+  x = PC1,
+  y = PC2,
+  color = diagnosis,
+  shape = brain_region
+)) +
+  geom_point(size = 3, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "PCA of gene expression",
+    x = paste0("PC1: ", percentVar[1], "% variance"),
+    y = paste0("PC2: ", percentVar[2], "% variance")
+  )
+```
+
+bekijk sample variatie:
+```{r}
+boxplot(
+  log2(normalized_counts + 1),
+  outline = FALSE,
+  las = 2,
+  main = "Normalized gene expression",
+  ylab = "log2(normalized counts + 1)"
+)
+```
+
+```{r}
+# Maximum count per gene over alle samples
+gene_max <- apply(gene_counts, 1, max)
+
+# Bekijk de grootste waarden
+sort(gene_max, decreasing = TRUE)[1:20]
+
+class(gene_max)
+```
+
+```{r}
+# Summary statistics
+summary(gene_max)
+
+# Quantiles
+quantile(
+  gene_max,
+  probs = c(0, 0.25, 0.5, 0.75, 0.90, 0.95, 0.99, 0.999)
+)
+```
+
+```{r}
+newcounts <- count_data [1:281, 1:281] %>%
+  pivot_longer(names_to="sample", values_to="counts",-"gene_id")
+
+ggplot(data=newcounts, aes(x=sample, y=counts)) + geom_boxplot()
+```
+
