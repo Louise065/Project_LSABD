@@ -1,0 +1,210 @@
+---
+title: "newgroupLSABD"
+output: html_document
+date: "2026-11-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+Research question: "Does the expression genes in major depressive disorder significantly differs from control looking at the anterior cingulate cortex while adjusting for age?"
+
+Hypotheses:
+  H0: There is no difference in gene expression between the major   depressive disorder and the control after correcting for age.
+  H1: There is a difference in gene expression between the major depressive disorder and the control after correcting for age.
+  
+  
+```{r}
+library(tidyverse)
+count_data <- read_csv("C:/Users/louis/Downloads/GSE80655_counts.csv")
+metadata <- read_csv("C:/Users/louis/Downloads/GSE80655_metadata.csv")
+```
+discover data:
+```{r}
+
+# Look at the dimensions
+dim(metadata)
+dim(count_data)
+
+# Look at the first rows
+head(metadata)
+head(count_data)
+
+# Look at the column names
+colnames(metadata)
+colnames(count_data)
+
+# Look at the structure
+str(metadata)
+str(count_data)
+
+# Summerise of data
+summary(metadata)
+
+# Look at diagnoses
+table(metadata$diagnosis)
+
+# Look at brain regions
+table(metadata$brain_region)
+
+```
+
+we select our relevant observations based on the research question:
+```{r}
+
+library(dplyr)
+
+metadata_AnCg <- metadata %>%
+  filter(
+    brain_region == "AnCg",
+    diagnosis %in% c("Control", "Major Depression")
+  )
+
+# Look at new dataset
+dim(metadata_AnCg)
+
+# Controle of the group deviation
+table(metadata_AnCg$diagnosis)
+
+# Controle of the brain regions
+table(metadata_AnCg$brain_region)
+
+```
+--> so this gives how many we have for each group
+
+look if there are any missing values:
+```{r}
+# Amount of missing values per variable
+colSums(is.na(metadata_AnCg))
+
+# Percentage missing values per variable
+colMeans(is.na(metadata_AnCg)) * 100
+```
+controle the age:
+```{r}
+summary(metadata_AnCg$age)
+
+# Histogram of the age
+hist(
+  metadata_AnCg$age,
+  main = "Age distribution in AnCg",
+  xlab = "Age",
+  col = "lightblue"
+)
+```
+
+Are there any outliers for age?
+```{r}
+boxplot(
+  metadata_AnCg$age,
+  main = "Age outliers in AnCg",
+  ylab = "Age",
+  col = "lightblue"
+)
+```
+
+And is the age comparable between the two groups?
+```{r}
+boxplot(
+  age ~ diagnosis,
+  data = metadata_AnCg,
+  main = "Age by diagnosis",
+  xlab = "Diagnosis",
+  ylab = "Age",
+  col = c("lightgreen", "lightpink")
+)
+```
+
+controls for the count data:
+```{r}
+# Look at the dimensions 
+dim(count_data)
+
+# Look at a few values
+head(count_data[, 1:6])
+
+# Look at the structure
+str(count_data)
+
+# Control if there are negative values
+sum(as.matrix(count_data[, -1]) < 0, na.rm = TRUE)
+
+# Control missing values
+sum(is.na(count_data))
+```
+
+
+
+Process to delete missing values:
+```{r}
+# A copy of count_data
+counts <- as.data.frame(count_data)
+
+# gene_id as row name
+rownames(counts) <- counts$gene_id
+
+# delete gene_id column
+counts$gene_id <- NULL
+
+# Only select samples in metadata_AnCg 
+sample_ids <- metadata_AnCg$description
+
+counts_AnCg <- as.matrix(counts[, sample_ids, drop = FALSE])
+```
+
+```{r}
+# Amount of genes & samples
+dim(counts_AnCg)
+
+# Control if samples names are the same
+all(colnames(counts_AnCg) == metadata_AnCg$description)
+
+# Look at the first rows
+head(counts_AnCg)
+```
+
+filtering as criteria in word doc for deleting missing values:
+```{r}
+# Calculate percentage of NA-values per gene 
+na_percentage <- rowMeans(is.na(counts_AnCg)) * 100
+
+# Select genes according to our 2 criteria
+keep_genes <- rowSums(counts_AnCg, na.rm = TRUE) > 0 &
+              na_percentage <= 95
+
+# Make filtered dataset
+counts_filtered <- counts_AnCg[keep_genes, , drop = FALSE]
+```
+
+```{r}
+# Amount of genes & samples before filtering
+dim(counts_AnCg)
+
+# Amount of genes & samples before filtering
+dim(counts_filtered)
+
+# How many genes are deleted
+nrow(counts_AnCg) - nrow(counts_filtered)
+```
+
